@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // ===== CONFIG =====
-const WEATHER_API_KEY = 'c66178d3af22f90183ae00b112e3068f';
+const WEATHER_API_KEY = 'Yor API Key here';
 const COLD_THRESHOLD_C = 10;
 const COLD_THRESHOLD_F = 50;
 
