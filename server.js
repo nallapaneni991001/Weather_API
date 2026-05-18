@@ -1,115 +1,105 @@
-﻿const express = require('express');
+const express = require('express');
 const axios = require('axios');
 const app = express();
 
 app.use(express.json());
 
+// ===== CONFIG =====
 const WEATHER_API_KEY = 'c66178d3af22f90183ae00b112e3068f';
-const WEATHER_API_URL = 'https://api.openweathermap.org/data/2.5/weather';
+const COLD_THRESHOLD_C = 10;
+const COLD_THRESHOLD_F = 50;
 
+// ===== WEATHER FUNCTION =====
 async function getWeather(city) {
   try {
-    console.log(`Fetching weather for: ${city}`);
-    const response = await axios.get(WEATHER_API_URL, {
+    const response = await axios.get('https://api.openweathermap.org/data/2.5/weather', {
       params: {
         q: city,
         appid: WEATHER_API_KEY,
         units: 'metric'
       }
     });
-    
-    const data = response.data;
     return {
       success: true,
-      city: data.name,
-      temp: data.main.temp,
-      feels_like: data.main.feels_like,
-      condition: data.weather[0].description,
-      humidity: data.main.humidity,
-      wind_speed: data.wind.speed
+      city: response.data.name,
+      temp_c: response.data.main.temp,
+      temp_f: (response.data.main.temp * 9/5) + 32,
+      condition: response.data.weather[0].description
     };
   } catch (error) {
-    console.error('Weather API error:', error.response?.data || error.message);
-    return {
-      success: false,
-      error: error.response?.data?.message || 'Weather API error'
-    };
+    return { success: false, error: 'City not found or API error' };
   }
 }
 
-app.post('/webhook/weather-sms', async (req, res) => {
-  console.log('\n=== Received webhook call ===');
-  console.log('Body:', req.body);
+// ===== SMS FUNCTION (simulated - logs only) =====
+function sendSMS(phone, city, temp_c) {
+  const message = `❄️ Cold weather alert! ${city} is ${temp_c}°C (below 10°C). Don't forget your coat!`;
+  console.log(`\n📱 SMS TO ${phone}: ${message}\n`);
+  return true;
+}
+
+// ===== MAIN WEBHOOK =====
+app.post('/webhook/weather-cold-alert', async (req, res) => {
+  console.log('\n📞 Call received:', req.body);
   
-  const { city, phone, carrier = 'att' } = req.body;
+  const { city, phone } = req.body;
   
   if (!city) {
-    return res.status(400).json({
-      error: 'Missing city parameter',
-      message: 'Please provide a city name'
+    return res.json({ 
+      success: false, 
+      message: "I need a city name. Please tell me your city." 
     });
   }
   
+  // Get weather
   const weather = await getWeather(city);
   
   if (!weather.success) {
-    return res.status(500).json({
-      error: weather.error,
-      message: `Could not get weather for ${city}`
+    return res.json({
+      success: false,
+      message: `Sorry, I couldn't find weather for ${city}. Can you say the city name again?`
     });
   }
   
-  const weatherText = `${weather.city}: ${weather.temp}°C, ${weather.condition}. Feels like ${weather.feels_like}°C. Humidity ${weather.humidity}%.`;
+  // Check if cold and send SMS
+  let smsSent = false;
+  if (weather.temp_c < COLD_THRESHOLD_C) {
+    if (phone) {
+      sendSMS(phone, weather.city, weather.temp_c);
+      smsSent = true;
+    }
+  }
   
-  if (phone) {
-    console.log(`\n[SMS WOULD BE SENT]`);
-    console.log(`To: ${phone}`);
-    console.log(`Message: Weather update for ${weather.city}: ${weather.temp}°C, ${weather.condition}`);
+  // Build voice response
+  let voiceMessage = `${weather.city} is ${weather.temp_c}°C with ${weather.condition}. `;
+  
+  if (weather.temp_c < COLD_THRESHOLD_C) {
+    voiceMessage += `It's cold! ${smsSent ? 'I sent you a text reminder to bring a coat.' : 'I would send a coat reminder but I need your phone number.'}`;
+  } else {
+    voiceMessage += `Temperature is above 10 degrees. No coat needed today!`;
   }
   
   res.json({
     success: true,
-    weather_text: weatherText,
-    sms_sent: phone ? true : false,
-    sms_method: phone ? 'logged' : 'none',
-    full_forecast: weatherText
+    message: voiceMessage,
+    sms_sent: smsSent,
+    temp_c: weather.temp_c
   });
-  
-  console.log('\n=== Response sent ===');
-  console.log(weatherText);
 });
 
-// HEALTH CHECK ENDPOINT
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// TEST ENDPOINT - This is what you're trying to access
+// ===== TEST ENDPOINTS =====
 app.get('/test', async (req, res) => {
-  console.log('Test endpoint called');
   const weather = await getWeather('London');
   res.json(weather);
 });
 
-// ROOT ENDPOINT - So you don't get "Cannot GET /"
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Weather Bot Server Running',
-    endpoints: {
-      test: 'GET /test',
-      health: 'GET /health',
-      webhook: 'POST /webhook/weather-sms'
-    }
-  });
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', cold_threshold: `${COLD_THRESHOLD_C}°C` });
 });
 
 const PORT = 3000;
 app.listen(PORT, () => {
-  console.log(`\n=================================`);
-  console.log(`✅ Weather bot running on port ${PORT}`);
-  console.log(`=================================`);
-  console.log(`Webhook URL: http://localhost:${PORT}/webhook/weather-sms`);
-  console.log(`Test URL: http://localhost:${PORT}/test`);
-  console.log(`Health URL: http://localhost:${PORT}/health`);
-  console.log(`=================================\n`);
+  console.log(`\n✅ Weather Cold Alert Bot Running`);
+  console.log(`📍 http://localhost:${PORT}`);
+  console.log(`🌡️  Cold threshold: ${COLD_THRESHOLD_C}°C\n`);
 });
